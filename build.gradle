@@ -1,10 +1,15 @@
+import org.apache.openwebbeans.gradle.shadow.OpenWebBeansPropertiesTransformer
+
 buildscript {
     repositories {
         mavenCentral()
+        jcenter()
     }
 
     dependencies {
         classpath 'org.apache.tomee.gradle:tomee-embedded:7.0.2'
+        classpath 'com.github.jengelman.gradle.plugins:shadow:1.2.3'
+        classpath 'org.apache.openwebbeans:openwebbeans-gradle:1.7.0'
     }
 }
 
@@ -12,6 +17,8 @@ plugins {
     id 'java'
     id 'war'
 }
+
+apply plugin: 'com.github.johnrengelman.shadow'
 
 group 'com.carcaret'
 version '1.0-SNAPSHOT'
@@ -29,5 +36,88 @@ dependencies {
     compile 'javax.json:javax.json-api:1.1.2'
     compile 'org.apache.johnzon:johnzon-core:1.1.8'
 
+    compile 'org.apache.tomee:tomee-embedded:7.0.2'
+
+    compileOnly 'org.projectlombok:lombok:1.16.10'
+
     testCompile group: 'junit', name: 'junit', version: '4.12'
+}
+
+// customize exclusions depending your app
+
+// first the not used dependencies like JSF, JAXWS, JMS ones
+def excludedDependenciesGroups = [
+        // gradle is buggy with poms, scope provided and optional I think
+        'com.google.code.findbugs',
+        'com.google.guava',
+        'javax.annotation',
+        'javax.ws.rs',
+        'net.sf.ehcache',
+        'org.apache.httpcomponents',
+        'org.ow2.asm',
+        // tomee jaxws, jms, etc...
+        'commons-codec',
+        'com.sun.xml.messaging.saaj',
+        'joda-time',
+        'junit',
+        'net.shibboleth.utilities',
+        'org.apache.activemq',
+        'org.apache.activemq.protobuf',
+        'org.apache.myfaces.core',
+        'org.apache.neethi',
+        'org.apache.santuario',
+        'org.apache.ws.xmlschema',
+        'org.apache.wss4j',
+        'org.bouncycastle',
+        'org.cryptacular',
+        'org.fusesource.hawtbuf',
+        'org.jasypt',
+        'org.jvnet.mimepull',
+        'org.opensaml',
+        'wsdl4j',
+        'xml-resolver'
+]
+
+// then cxf+tomee specific dependencies so we need to be more precise than the group
+// to not exclude everything
+def excludedDependenciesArtifacts = [
+        'cxf-rt-bindings-soap',
+        'cxf-rt-bindings-xml',
+        'cxf-rt-databinding-jaxb',
+        'cxf-rt-frontend-jaxws',
+        'cxf-rt-frontend-simple',
+        'cxf-rt-security-saml',
+        'cxf-rt-ws-addr',
+        'cxf-rt-wsdl',
+        'cxf-rt-ws-policy',
+        'cxf-rt-ws-security',
+        'openejb-cxf',
+        'openejb-webservices',
+        'tomee-webservices',
+        'geronimo-connector',
+        'geronimo-javamail_1.4_mail'
+]
+
+shadowJar {
+    classifier = 'bundle'
+
+    // merge SPI descriptors
+    mergeServiceFiles()
+    append 'META-INF/cxf/bus-extensions.txt'
+    transform(OpenWebBeansPropertiesTransformer.class)
+
+    // switch off JSF + JMS + JAXWS
+    exclude 'META-INF/faces-config.xml'
+    exclude 'module-info.class' // it's a Java 10 feature and class org.objectweb.asm.ClassReader line 169 fails if class version > 1.8
+    dependencies {
+        exclude(dependency {
+            excludedDependenciesGroups.contains(it.moduleGroup) ||
+                    excludedDependenciesArtifacts.contains(it.moduleName)
+        })
+    }
+
+    // ensure we define the expected Main (if you wrap tomee main use your own class)
+    manifest {
+        attributes 'Main-Class': 'org.apache.tomee.embedded.FatApp'
+    }
 }
